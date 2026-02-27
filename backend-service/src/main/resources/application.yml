@@ -5,7 +5,7 @@ spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/postgres  # Replace with actual DB name
     username: postgres                              # Replace with actual DB username
-    password: password                              # Replace with actual DB password
+    password: 123456                              # Replace with actual DB password
     driver-class-name: org.postgresql.Driver
 
   jpa:
