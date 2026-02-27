@@ -8,7 +8,7 @@ import java.util.UUID;
 public class EventPayload {
     private String eventType;
     private Long timestamp;
-    private Long staffId;
+    private Integer staffId;
     private UUID customerId;
     private String cameraId;
     private String zoneId;

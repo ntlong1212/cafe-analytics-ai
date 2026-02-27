@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import org.hibernate.annotations.ColumnTransformer;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -27,11 +28,11 @@ public class TrackingEvent {
     private Instant eventTime;
 
     @Column(name = "event_type", nullable = false, columnDefinition = "event_category")
-    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @ColumnTransformer(write = "?::event_category")
     private String eventType;
 
     @Column(name = "staff_id")
-    private Long staffId;
+    private Integer staffId;
 
     @Column(name = "customer_id")
     private UUID customerId;
