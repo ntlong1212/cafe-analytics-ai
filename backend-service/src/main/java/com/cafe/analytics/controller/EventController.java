@@ -26,11 +26,12 @@ public class EventController {
         for (EventPayload payload : payloads) {
             TrackingEvent event = new TrackingEvent();
             event.setEventType(payload.getEventType());
-            event.setTrackingId(payload.getTrackingId());
             // Convert epoch millis to Instant
-            event.setTimestamp(
+            event.setEventTime(
                     payload.getTimestamp() != null ? Instant.ofEpochMilli(payload.getTimestamp()) : Instant.now());
-            event.setDetails(payload.getDetails());
+            event.setCameraId(payload.getCameraId());
+            event.setZoneId(payload.getZoneId());
+            event.setMetadata(payload.getMetadata());
             events.add(event);
         }
 

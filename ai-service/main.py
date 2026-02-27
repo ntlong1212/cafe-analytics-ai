@@ -109,10 +109,13 @@ def main():
                     tracked_persons.add(track_id)
                     
                     event_data = {
-                        "eventType": "CUSTOMER_ENTRY", # Tên sự kiện (có thể tùy chỉnh)
-                        "trackingId": int(track_id),
+                        "eventType": "CUSTOMER_ENTER", # Map to Enum event_category in DB
                         "timestamp": int(time.time() * 1000),
-                        "details": f"Detected new person with ID {track_id}"
+                        "cameraId": "CAM_MAIN_DOOR",
+                        "metadata": {
+                            "tracking_id": int(track_id),
+                            "details": f"Detected new person with ID {track_id}"
+                        }
                     }
                     
                     # Thay vì tạo thread gửi ngay, đưa vào queue để worker gom mẻ (batch)

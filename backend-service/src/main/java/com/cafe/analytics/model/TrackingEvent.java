@@ -4,11 +4,16 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.UUID;
+import java.util.Map;
 
 @Entity
-@Table(name = "events")
+@Table(name = "ai_events_log")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -18,15 +23,30 @@ public class TrackingEvent {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "event_type", nullable = false)
+    @Column(name = "event_time", nullable = false)
+    private Instant eventTime;
+
+    @Column(name = "event_type", nullable = false, columnDefinition = "event_category")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     private String eventType;
 
-    @Column(name = "tracking_id", nullable = false)
-    private Long trackingId;
+    @Column(name = "staff_id")
+    private Long staffId;
 
-    @Column(name = "timestamp", nullable = false)
-    private Instant timestamp;
+    @Column(name = "customer_id")
+    private UUID customerId;
 
-    @Column(name = "details", length = 500)
-    private String details;
+    @Column(name = "camera_id", length = 50)
+    private String cameraId;
+
+    @Column(name = "zone_id", length = 50)
+    private String zoneId;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "metadata", columnDefinition = "jsonb")
+    private Map<String, Object> metadata;
+
+    @CreationTimestamp
+    @Column(name = "created_at", updatable = false)
+    private Instant createdAt;
 }
