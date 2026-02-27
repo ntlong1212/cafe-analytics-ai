@@ -2,22 +2,60 @@ import cv2
 import requests
 import time
 from ultralytics import YOLO
+import queue
 import threading
+import json
 
 # Cấu hình Camera hoặc Video
 VIDEO_SOURCE = 0 # Sử dụng webcam. Có thể thay bằng đường dẫn video.
 # URL của Java Backend API
-BACKEND_API_URL = "http://localhost:8080/api/events"
+BACKEND_API_URL = "http://localhost:8080/api/events/batch"
 
-def send_event_to_backend(event_data):
-    """
-    Gửi dữ liệu sự kiện nhận diện được sang Java Backend
-    """
-    try:
-        response = requests.post(BACKEND_API_URL, json=event_data, timeout=2)
-        print(f"[Backend Response] Status: {response.status_code}, Data: {event_data}")
-    except requests.exceptions.RequestException as e:
-        print(f"[Error] Failed to send data to backend: {e}")
+# Hàng đợi chứa các sự kiện chờ gửi
+event_queue = queue.Queue()
+
+def event_worker():
+    """Luồng chạy ngầm: Lấy event từ queue, gom thành mẻ (batch) và gửi đi."""
+    while True:
+        batch = []
+        # Chờ tối đa 2 giây để lấy event (tạo mini-batch)
+        try:
+            event = event_queue.get(timeout=2)
+            batch.append(event)
+            # Lấy thêm các event có sẵn trong queue mà không cần chờ tiếp
+            while not event_queue.empty() and len(batch) < 50:
+                batch.append(event_queue.get_nowait())
+        except queue.Empty:
+            pass # Quá thời gian chờ không có event mới thì bỏ qua
+
+        if batch:
+            send_batch_with_retry(batch)
+            for _ in batch:
+                event_queue.task_done()
+
+def send_batch_with_retry(batch, max_retries=3):
+    """Gửi một batch sự kiện, nếu lỗi thì thử lại vài lần."""
+    retries = 0
+    while retries < max_retries:
+        try:
+            response = requests.post(BACKEND_API_URL, json=batch, timeout=3)
+            if response.status_code in (200, 201):
+                print(f"[Backend] Gửi thành công {len(batch)} sự kiện.")
+                return
+            else:
+                print(f"[Backend] Lỗi server: {response.status_code}. Thử lại...")
+        except requests.exceptions.RequestException as e:
+            print(f"[Backend] Lỗi kết nối: {e}. Thử lại {retries + 1}/{max_retries}...")
+        
+        retries += 1
+        time.sleep(2 ** retries) # Exponential backoff: 2s, 4s, 8s
+    
+    # Nếu hết số lần retry mà vẫn lỗi thì có thể lưu ra file text (Dead letter queue)
+    print(f"[CẢNH BÁO] Không thể gửi {len(batch)} sự kiện sau {max_retries} lần thử. Dữ liệu có thể bị mất.")
+
+# Khởi chạy worker chạy ngầm
+worker_thread = threading.Thread(target=event_worker, daemon=True)
+worker_thread.start()
 
 def main():
     # Tải mô hình YOLOv8 (sử dụng mô hình nhỏ gọn yolov8n.pt hoặc yolov8s.pt)
@@ -77,8 +115,8 @@ def main():
                         "details": f"Detected new person with ID {track_id}"
                     }
                     
-                    # Dùng luồng (thread) để không làm chậm video frame
-                    threading.Thread(target=send_event_to_backend, args=(event_data,)).start()
+                    # Thay vì tạo thread gửi ngay, đưa vào queue để worker gom mẻ (batch)
+                    event_queue.put(event_data)
             
             # Hiển thị số lượng người trên màn hình
             cv2.putText(frame, f"People count: {current_people_count}", (20, 40), 

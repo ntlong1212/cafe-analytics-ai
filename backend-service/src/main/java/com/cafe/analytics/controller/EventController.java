@@ -18,20 +18,28 @@ public class EventController {
 
     private final TrackingEventRepository repository;
 
-    @PostMapping
-    public ResponseEntity<String> receiveEvent(@RequestBody EventPayload payload) {
-        log.info("Received event from AI service: {}", payload);
+    @PostMapping("/batch")
+    public ResponseEntity<String> receiveEventBatch(@RequestBody java.util.List<EventPayload> payloads) {
+        log.info("Received batch of {} events from AI service", payloads.size());
 
-        TrackingEvent event = new TrackingEvent();
-        event.setEventType(payload.getEventType());
-        event.setTrackingId(payload.getTrackingId());
-        // Convert epoch millis to Instant
-        event.setTimestamp(
-                payload.getTimestamp() != null ? Instant.ofEpochMilli(payload.getTimestamp()) : Instant.now());
-        event.setDetails(payload.getDetails());
+        java.util.List<TrackingEvent> events = new java.util.ArrayList<>();
+        for (EventPayload payload : payloads) {
+            TrackingEvent event = new TrackingEvent();
+            event.setEventType(payload.getEventType());
+            event.setTrackingId(payload.getTrackingId());
+            // Convert epoch millis to Instant
+            event.setTimestamp(
+                    payload.getTimestamp() != null ? Instant.ofEpochMilli(payload.getTimestamp()) : Instant.now());
+            event.setDetails(payload.getDetails());
+            events.add(event);
+        }
 
-        repository.save(event);
-
-        return ResponseEntity.ok("Event received and saved successfully.");
+        try {
+            repository.saveAll(events);
+            return ResponseEntity.ok("Batch of " + events.size() + " events received and saved successfully.");
+        } catch (Exception e) {
+            log.error("Failed to save event batch to database", e);
+            return ResponseEntity.internalServerError().body("Database error occurred while saving events.");
+        }
     }
 }
