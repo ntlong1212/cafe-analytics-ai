@@ -13,6 +13,9 @@ VIDEO_SOURCE = 0 # Use webcam. Can be replaced with a video file path.
 # Java Backend API URL
 BACKEND_API_URL = "http://localhost:8080/api/events/batch"
 
+# Queue cho luồng phân tích khuôn mặt (DeepFace)
+face_queue = queue.Queue()
+
 # Queue for background HTTP requests
 event_queue = queue.Queue()
 
@@ -63,27 +66,76 @@ def send_batch_with_retry(batch, max_retries=3):
 worker_thread = threading.Thread(target=event_worker, daemon=True)
 worker_thread.start()
 
-def async_analyze_face(frame_crop, track_id, person_info_dict):
-    """Phân tích tuổi, giới tính trong một luồng riêng để tránh đứng hình video."""
-    try:
-        # Lấy thông tin tuổi và giới tính
-        res = DeepFace.analyze(frame_crop, actions=['age', 'gender'], enforce_detection=False)
-        if isinstance(res, list):
-            res = res[0]
-        
-        # Lấy Face Vector
-        embedding = DeepFace.represent(frame_crop, model_name="VGG-Face", enforce_detection=False)
-        if isinstance(embedding, list) and len(embedding) > 0:
-            face_vector = embedding[0].get('embedding')
-            person_info_dict[track_id]['metadata']['face_embedding'] = face_vector
+def face_analysis_worker():
+    """Luồng chạy ngầm: Phân tích lần lượt từng Face để tránh cháy RAM (OOM)."""
+    global person_info
+    while True:
+        try:
+            track_id, frame_crop = face_queue.get()
+            if frame_crop is None:
+                continue
 
-        person_info_dict[track_id]['metadata']['age'] = res.get('age')
-        person_info_dict[track_id]['metadata']['gender'] = res.get('dominant_gender')
-        
-    except Exception as e:
-        print(f"Face Analysis failed for ID {track_id}: {e}")
-    finally:
-        person_info_dict[track_id]['analyzed_face'] = True
+            # Check if person still exists in tracking dictionary
+            if track_id not in person_info:
+                face_queue.task_done()
+                continue
+            
+            # Phân tích tuổi, giới tính
+            res = DeepFace.analyze(frame_crop, actions=['age', 'gender'], enforce_detection=False)
+            if isinstance(res, list):
+                res = res[0]
+            
+            # Lấy Face Vector
+            embedding = DeepFace.represent(frame_crop, model_name="VGG-Face", enforce_detection=False)
+            if isinstance(embedding, list) and len(embedding) > 0:
+                face_vector = embedding[0].get('embedding')
+                # Check existance safely to prevent race conditions during Garbage Collecting
+                if track_id in person_info:
+                    person_info[track_id]['metadata']['face_embedding'] = face_vector
+
+            if track_id in person_info:
+                person_info[track_id]['metadata']['age'] = res.get('age')
+                person_info[track_id]['metadata']['gender'] = res.get('dominant_gender')
+                person_info[track_id]['analyzed_face'] = True
+                
+                # SEND EVENT TO BACKEND IMMEDIATELY TO REGISTER CUSTOMER/STAFF
+                event_queue.put({
+                    "eventType": "FACE_ANALYZED",
+                    "timestamp": int(time.time() * 1000),
+                    "cameraId": "CAM_MAIN",
+                    "metadata": person_info[track_id]['metadata']
+                })
+                
+        except Exception as e:
+            print(f"Face Analysis failed for ID {track_id}: {e}")
+            if track_id in person_info:
+                person_info[track_id]['analyzed_face'] = True # Bỏ qua nếu lỗi
+        finally:
+            face_queue.task_done()
+
+# Khởi động Face Worker chậm lại ở ngã tư
+face_thread = threading.Thread(target=face_analysis_worker, daemon=True)
+
+def garbage_collector():
+    """Luồng chạy ngầm: Tự động xóa data của những người không còn trong khung hình (tránh memory leak)."""
+    global person_info
+    while True:
+        time.sleep(30) # Quét mỗi 30 giây
+        current_time = time.time()
+        keys_to_delete = []
+        for track_id, info in list(person_info.items()):
+            # Nếu người này không xuất hiện trong vòng 60 giây qua -> Xóa
+            if current_time - info.get('last_seen', current_time) > 60:
+                keys_to_delete.append(track_id)
+                
+        for key in keys_to_delete:
+            del person_info[key]
+            
+        if keys_to_delete:
+            print(f"[Garbage Collector] Đã xóa {len(keys_to_delete)} ID ẩn khỏi bộ nhớ.")
+
+# Khởi động Garbage Collector
+gc_thread = threading.Thread(target=garbage_collector, daemon=True)
 
 def main():
     print("Loading YOLO model...")
@@ -94,12 +146,20 @@ def main():
         print("Error: Could not open video source.")
         return
 
+    print("Starting Background AI analysis tasks...")
+    # Khởi động các luồng quan trọng trước khi bắt hình
+    global person_info
+    
+    # Bắt đầu luồng kiểm tra khuôn mặt và dọn rác
+    face_thread.start()
+    gc_thread.start()
+
     print("Starting Object Tracking and ROI Analysis...")
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     # Dictionary lưu trữ state của từng người
-    person_info = {} # track_id -> {'analyzed_face': bool, 'current_roi': str, 'roi_entry_time': float, 'metadata': dict}
+    person_info = {} # track_id -> {'analyzed_face': bool, 'current_roi': str, 'roi_entry_time': float, 'last_seen': float, 'metadata': dict}
 
     while True:
         ret, frame = cap.read()
@@ -147,13 +207,14 @@ def main():
                     })
 
                 info = person_info[track_id]
+                info['last_seen'] = time.time()  # Quan trọng cho Garbage Collector
 
                 # Phân tích khuôn mặt 1 lần
                 if not info['analyzed_face']:
                     person_crop = frame[max(0, y1):max(0, y2), max(0, x1):max(0, x2)]
                     if person_crop.size > 0:
-                        info['analyzed_face'] = True # Đánh dấu tạm để không phân tích liên tục
-                        threading.Thread(target=async_analyze_face, args=(person_crop.copy(), track_id, person_info)).start()
+                        info['analyzed_face'] = True # Đánh dấu tạm để không ném vào queue liên tục
+                        face_queue.put((track_id, person_crop.copy()))
 
                 # Kiểm tra thay đổi ROI và tính Dwell Time (Thời gian đứng trong 1 ROI)
                 if current_roi != info['current_roi']:

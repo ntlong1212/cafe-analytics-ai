@@ -10,7 +10,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate # Ensures Hibernate only validates that the schema matches the DB structure, avoiding accidental drops.
+      ddl-auto: update # Automatically update DB schema with face_vector arrays
     show-sql: true
     properties:
       hibernate:

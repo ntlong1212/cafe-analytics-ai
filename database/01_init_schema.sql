@@ -8,14 +8,14 @@ CREATE TABLE IF NOT EXISTS staff (
     id SERIAL PRIMARY KEY,
     full_name VARCHAR(100) NOT NULL,
     role VARCHAR(50) NOT NULL, -- e.g., 'BARISTA', 'WAITER'
-    face_encoding_id VARCHAR(255) UNIQUE, -- ID linking to vector database if needed
+    face_vector FLOAT8[], -- ID linking to vector database if needed
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS customers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    face_vector_id VARCHAR(255) UNIQUE, -- To recognize returning customers without storing real photos
+    face_vector FLOAT8[], -- To recognize returning customers (stores the 128/512 dim embedding array)
     predicted_gender VARCHAR(10), -- 'MALE', 'FEMALE'
     predicted_age_range VARCHAR(20), -- e.g., '18-25', '26-35'
     first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
