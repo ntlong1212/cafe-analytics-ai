@@ -103,7 +103,8 @@ public class EventController {
             event.setCustomerId(finalCustomerId);
             event.setMetadata(payload.getMetadata());
 
-            // Avoid violating PostgreSQL ENUM constraints
+            // Avoid saving raw FACE_ANALYZED to PostgreSQL (To save DB Space), 
+            // BUT do it AFTER we have successfully mapped the trackId -> StaffId/CustomerId above!
             if ("FACE_ANALYZED".equals(payload.getEventType())) {
                 continue;
             }

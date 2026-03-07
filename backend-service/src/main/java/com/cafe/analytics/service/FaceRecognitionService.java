@@ -21,7 +21,7 @@ public class FaceRecognitionService {
     private final StaffRepository staffRepository;
     
     // Thresholds for Cosine Similarity
-    private static final double STAFF_SIMILARITY_THRESHOLD = 0.85; // Stricter for Staff
+    private static final double STAFF_SIMILARITY_THRESHOLD = 0.76; // Giảm xuống 0.76 cho góc quay từ trên xuống của camera an ninh
     private static final double CUSTOMER_SIMILARITY_THRESHOLD = 0.70;
 
     /**

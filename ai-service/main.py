@@ -81,12 +81,12 @@ def face_analysis_worker():
                 continue
             
             # Phân tích tuổi, giới tính
-            res = DeepFace.analyze(frame_crop, actions=['age', 'gender'], enforce_detection=False)
+            res = DeepFace.analyze(frame_crop, actions=['age', 'gender'], enforce_detection=True)
             if isinstance(res, list):
                 res = res[0]
             
             # Lấy Face Vector
-            embedding = DeepFace.represent(frame_crop, model_name="VGG-Face", enforce_detection=False)
+            embedding = DeepFace.represent(frame_crop, model_name="Facenet512", enforce_detection=True)
             if isinstance(embedding, list) and len(embedding) > 0:
                 face_vector = embedding[0].get('embedding')
                 # Check existance safely to prevent race conditions during Garbage Collecting
@@ -106,10 +106,16 @@ def face_analysis_worker():
                     "metadata": person_info[track_id]['metadata']
                 })
                 
+        except ValueError as e:
+            # Lỗi không tìm thấy khuôn mặt (khi dùng enforce_detection=True)
+            # Không đánh dấu analyzed_face = True để vòng main có thể gửi thử lại
+            print(f"Không tìm thấy khuôn mặt cho ID {track_id}, sẽ thử lại sau.")
+            if track_id in person_info:
+                person_info[track_id]['analyzed_face'] = False
         except Exception as e:
             print(f"Face Analysis failed for ID {track_id}: {e}")
             if track_id in person_info:
-                person_info[track_id]['analyzed_face'] = True # Bỏ qua nếu lỗi
+                person_info[track_id]['analyzed_face'] = False # Vẫn cho phép thử lại nếu lỗi khác
         finally:
             face_queue.task_done()
 
@@ -159,7 +165,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     # Dictionary lưu trữ state của từng người
-    person_info = {} # track_id -> {'analyzed_face': bool, 'current_roi': str, 'roi_entry_time': float, 'last_seen': float, 'metadata': dict}
+    person_info = {} # track_id -> {'analyzed_face': bool, 'analysis_attempts': int, 'last_analysis_time': float, 'current_roi': str, 'roi_entry_time': float, 'last_seen': float, 'metadata': dict}
 
     while True:
         ret, frame = cap.read()
@@ -194,6 +200,8 @@ def main():
                 if track_id not in person_info:
                     person_info[track_id] = {
                         'analyzed_face': False,
+                        'analysis_attempts': 0,
+                        'last_analysis_time': 0,
                         'current_roi': current_roi,
                         'roi_entry_time': time.time() if current_roi else None,
                         'metadata': {'tracking_id': int(track_id)}
@@ -209,12 +217,24 @@ def main():
                 info = person_info[track_id]
                 info['last_seen'] = time.time()  # Quan trọng cho Garbage Collector
 
-                # Phân tích khuôn mặt 1 lần
-                if not info['analyzed_face']:
-                    person_crop = frame[max(0, y1):max(0, y2), max(0, x1):max(0, x2)]
-                    if person_crop.size > 0:
-                        info['analyzed_face'] = True # Đánh dấu tạm để không ném vào queue liên tục
-                        face_queue.put((track_id, person_crop.copy()))
+                # Phân tích khuôn mặt: thử lại nếu lấy phân tích chưa xong
+                if not info.get('analyzed_face', False):
+                    # Timeout 1s giữa mỗi lần gửi mẫu thử, tối đa 4 lần thử (nếu người ta cứ quay lưng)
+                    if time.time() - info.get('last_analysis_time', 0) > 1.0 and info.get('analysis_attempts', 0) < 4:
+                        
+                        # Mở rộng vùng cắt (padding) thêm 15% xung quanh khuôn mặt để DeepFace tìm được cằm và tóc dễ hơn
+                        w, h = x2 - x1, y2 - y1
+                        pad_x = int(w * 0.15)
+                        pad_y = int(h * 0.15)
+                        
+                        person_crop = frame[max(0, y1 - pad_y):min(frame.shape[0], y2 + pad_y), 
+                                            max(0, x1 - pad_x):min(frame.shape[1], x2 + pad_x)]
+                                            
+                        if person_crop.size > 0:
+                            info['analyzed_face'] = True # Đánh dấu tạm để Worker không bị spam hình quá nhiều
+                            info['last_analysis_time'] = time.time()
+                            info['analysis_attempts'] = info.get('analysis_attempts', 0) + 1
+                            face_queue.put((track_id, person_crop.copy()))
 
                 # Kiểm tra thay đổi ROI và tính Dwell Time (Thời gian đứng trong 1 ROI)
                 if current_roi != info['current_roi']:
