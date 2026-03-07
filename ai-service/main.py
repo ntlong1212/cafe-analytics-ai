@@ -9,7 +9,7 @@ import numpy as np
 from deepface import DeepFace
 
 # Camera or Video configuration
-VIDEO_SOURCE = 0 # Use webcam. Can be replaced with a video file path.
+VIDEO_SOURCE = "video_chuyen_nghiep.mp4"
 # Java Backend API URL
 BACKEND_API_URL = "http://localhost:8080/api/events/batch"
 
@@ -20,10 +20,12 @@ face_queue = queue.Queue()
 event_queue = queue.Queue()
 
 # Định nghĩa các vùng Region of Interest (ROI)
-# Tọa độ (x, y) của các đa giác trên frame 640x480
+# Dựa trên kích thước video mới (1920x2160)
 ROIS = {
-    "BAR_ZONE": np.array([[50, 200], [250, 200], [250, 480], [50, 480]], np.int32),
-    "ENTRANCE_ZONE": np.array([[350, 50], [600, 50], [600, 250], [350, 250]], np.int32)
+    # Khu vực quầy pha chế (BAR) - Camera dưới (Bên trái, quầy màu xanH)
+    "BAR_ZONE": np.array([[50, 1200], [850, 1200], [850, 2100], [50, 2100]], np.int32),
+    # Khu vực cửa ra vào (ENTRANCE) - Camera trên (Bên phải, khu vực bàn ghế gỗ)
+    "ENTRANCE_ZONE": np.array([[1000, 150], [1850, 150], [1850, 1000], [1000, 1000]], np.int32)
 }
 
 def event_worker():
@@ -161,8 +163,9 @@ def main():
     gc_thread.start()
 
     print("Starting Object Tracking and ROI Analysis...")
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # Thay đổi độ phân giải về 1920x2160 (nếu dùng video có kích thước này)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
 
     # Dictionary lưu trữ state của từng người
     person_info = {} # track_id -> {'analyzed_face': bool, 'analysis_attempts': int, 'last_analysis_time': float, 'current_roi': str, 'roi_entry_time': float, 'last_seen': float, 'metadata': dict}
@@ -272,7 +275,9 @@ def main():
         else:
             cv2.putText(frame, "People count: 0", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-        cv2.imshow("Cafe Analytics - Object Tracking", frame)
+        # Thay đổi kích thước hiển thị cho vừa màn hình (chia 3 kích thước: 1920/3=640, 2160/3=720)
+        display_frame = cv2.resize(frame, (640, 720))
+        cv2.imshow("Cafe Analytics - Object Tracking", display_frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
